@@ -1,61 +1,37 @@
-import requests
-import streamlit as st
-from typing import List, Dict, Tuple, Set
+from typing import List, Dict
 
 class RecipeService:
-    """
-    Handles Business Logic: API communication and Matching Algorithm
-    """
-    BASE_URL = "https://www.themealdb.com/api/json/v1/1/"
-
     @staticmethod
-    @st.cache_data(ttl=3600)
-    def fetch_canditate(main_ingredient: str) -> List[Dict]:
-        """Fetches recipe IDs based on the anchor ingredient."""
-        url = f"https://www.themealdb.com/api/json/v1/1/filter.php?i={main_ingredient}"
-        try:
-            response = response.get(url, timeout = 5)
-            response.raise_for_status()
-            data = response.json()
-            return  data.get('meals', [])
-        except requests.RequestException:
-            return []
-        
-    @staticmethod
-    def get_meal_details(meal_id: str) -> Dict:
-        """Fetches full metadata for a single recipe."""
-        url = f"https://www.themealdb.com/api/json/v1/1/lookup.php?i={meal_id}"
-        try:
-            response = requests.get(url, timeout = 5)
-            data = response.json()
-            return data['meals'][0] if data['meals'] else {}
-        except requests.RequestException:
-            return {}
-        
-    @staticmethod
-    def calculate_match_score(meal_details: Dict, user_pantry: List[str]) -> Tuple[int, List[str]]:
+    def match_recipes(all_recipes: List[Dict], user_inventory: List[str]) -> List[Dict]:
         """
-        DASE CORE: Calculates compatibility score using Set Theory.
+        The 'Brain'. Compares user inventory against local recipe database.
+        Returns recipes sorted by Match Score.
         """
+        results = []
+        # Convert user inventory to a Set for speed
+        pantry_set = set(item.lower() for item in user_inventory)
 
-        recipe_ingredients: Set[str] = set()
-        for i in range(1,21):
-            ing = meal_details.get(f"strIngredient{i}")
-            if ing and ing.strip():
-                recipe_ingredients.add(ing.lower().strip())
+        for recipe in all_recipes:
+            # Parse database string "egg, milk" -> Set {"egg", "milk"}
+            r_ingredients = [x.strip().lower() for x in recipe['ingredients'].split(',')]
+            r_set = set(r_ingredients)
 
-        if not recipe_ingredients:
-            return 0, []
-        
-        matches = 0
-        missing = []
-        pantry_set = {p.lower() for p in user_pantry}
+            # INTERSECTION LOGIC
+            owned = pantry_set.intersection(r_set)
+            missing = r_set - pantry_set
+            
+            # Calculate Score
+            total_needed = len(r_set)
+            score = int((len(owned) / total_needed) * 100)
 
-        for r_ing in recipe_ingredients:
-            if any(p_item in r_ing for p_item in pantry_set):
-                matches += 1
-            else:
-                missing.append(r_ing.title())
+            # We create a new dict for the UI to use
+            results.append({
+                **recipe, # Unpack existing data
+                "score": score,
+                "missing_items": list(missing),
+                "owned_count": len(owned)
+            })
 
-        score = int((matches / len(recipe_ingredients)) * 100)
-        return score, missing
+        # Sort: Highest Match First
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results
